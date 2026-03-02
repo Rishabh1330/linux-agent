@@ -1,0 +1,161 @@
+import json
+import boto3
+from decimal import Decimal
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('cis-agent-reports')
+
+
+# ---------- Fix Decimal JSON Serialization ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super(DecimalEncoder, self).default(obj)
+
+
+# ---------- Common CORS Headers ----------
+def cors_headers():
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "GET,OPTIONS"
+    }
+
+
+# ---------- Get All Items with Pagination ----------
+def scan_all_items():
+    items = []
+    response = table.scan()
+    items.extend(response.get("Items", []))
+
+    while "LastEvaluatedKey" in response:   #pagintion
+        response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+        items.extend(response.get("Items", []))
+
+    return items
+
+
+# ---------- Get Latest Record Per Host ----------
+def get_latest_per_host(items):
+    latest = {}
+
+    for item in items:
+        host = item.get("host_id")
+        timestamp = item.get("timestamp")
+
+        if not host or not timestamp:
+            continue
+
+        if host not in latest or timestamp > latest[host]["timestamp"]:
+            latest[host] = item
+
+    return latest
+
+
+def lambda_handler(event, context):
+
+    path = event.get("rawPath") or event.get("path") or ""
+    method = (
+        event.get("requestContext", {}).get("http", {}).get("method")
+        or event.get("httpMethod", "")
+    )
+
+    # ---------- CORS Preflight ----------
+    if method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": cors_headers(),
+            "body": json.dumps({"message": "CORS preflight successful"})
+        }
+
+    if method != "GET":
+        return {
+            "statusCode": 405,
+            "headers": cors_headers(),
+            "body": json.dumps({"message": "Method Not Allowed"})
+        }
+
+    try:
+        # Fetch all records
+        items = scan_all_items()
+
+        # Get only latest per hostname
+        latest_items = get_latest_per_host(items)
+
+        # ---------- /hosts ----------
+        if path.endswith("/hosts"):
+
+            hosts = [
+                {
+                    "hostname": item.get("host_id"),
+                    "timestamp": item.get("timestamp")
+                }
+                for item in latest_items.values()
+            ]
+
+            return {
+                "statusCode": 200,
+                "headers": cors_headers(),
+                "body": json.dumps(hosts, cls=DecimalEncoder)
+            }
+
+        # ---------- /apps ----------
+        elif path.endswith("/apps"):
+
+            apps = []
+
+            for item in latest_items.values():
+                data = item.get("data", {})
+                if not isinstance(data, dict):
+                    data = {}
+
+                apps.append({
+                    "hostname": item.get("host_id"),
+                    "timestamp": item.get("timestamp"),
+                    "packages": data.get("packages", [])
+                })
+
+            return {
+                "statusCode": 200,
+                "headers": cors_headers(),
+                "body": json.dumps(apps, cls=DecimalEncoder)
+            }
+
+        # ---------- /cis-results ----------
+        elif path.endswith("/cis-results"):
+
+            results = []
+
+            for item in latest_items.values():
+                data = item.get("data", {})
+                if not isinstance(data, dict):
+                    data = {}
+
+                results.append({
+                    "hostname": item.get("host_id"),
+                    "timestamp": item.get("timestamp"),
+                    "cis_results": data.get("cis_results", []),
+                    "summary": data.get("summary", {})
+                })
+
+            return {
+                "statusCode": 200,
+                "headers": cors_headers(),
+                "body": json.dumps(results, cls=DecimalEncoder)
+            }
+
+        # ---------- Not Found ----------
+        else:
+            return {
+                "statusCode": 404,
+                "headers": cors_headers(),
+                "body": json.dumps({"message": "Route Not Found"})
+            }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": cors_headers(),
+            "body": json.dumps({"error": str(e)})
+        }
