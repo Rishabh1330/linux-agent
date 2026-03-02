@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CIS Security Dashboard</title>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial;
+            margin: 40px;
+            background: #f4f6f9;
+        }
+
+        h1 {
+            color: #222;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 18px;
+            margin: 5px;
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            margin-top: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th, td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+        }
+         th {
+            background: #007bff;
+            color: white;
+        }
+
+        .host-card {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+        }
+
+        .badge-pass {
+            background: #28a745;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-right: 8px;
+        }
+
+        .badge-fail {
+            background: #dc3545;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-right: 8px;
+        }
+
+        .cis-item {
+            padding: 10px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .evidence {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .score-box {
+            background: #e9ecef;
+            height: 18px;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+      height: 100%;
+            background: linear-gradient(90deg, #28a745, #ffc107);
+        }
+
+        details summary {
+            cursor: pointer;
+            font-weight: 500;
+            margin-top: 10px;
+        }
+
+    </style>
+</head>
+
+<body>
+
+<h1>CIS Linux Security Dashboard</h1>
+
+<button onclick="loadHosts()">Load Hosts</button>
+<button onclick="loadApps()">Load Installed Packages</button>
+<button onclick="loadCIS()">Load CIS Results</button>
+
+<div class="card">
+    <h3>Output</h3>
+    <div id="output">Click a button to load data...</div>
+</div>
+<script>
+
+const baseURL = "https://gaaugzfa06.execute-api.ap-south-1.amazonaws.com/prod";
+
+/* ---------------- HOSTS ---------------- */
+
+async function loadHosts() {
+    try {
+        const response = await fetch(baseURL + "/hosts");
+        const data = await response.json();
+
+        let html = `
+            <table>
+                <tr>
+                    <th>Hostname</th>
+                    <th>Last Scan Time</th>
+                </tr>
+        `;
+
+        data.forEach(host => {
+            html += `
+                <tr>
+                    <td>${host.hostname}</td>
+                    <td>${new Date(host.timestamp).toLocaleString()}</td>
+                </tr>
+            `;
+        });
+
+        html += "</table>";
+
+        document.getElementById("output").innerHTML = html;
+
+    } catch (error) {
+        showError("Error loading hosts");
+    }
+}
+
+/* ---------------- PACKAGES ---------------- */
+
+async function loadApps() {
+    try {
+        const response = await fetch(baseURL + "/apps");
+        const data = await response.json();
+
+        let html = "";
+
+        data.forEach(host => {
+            html += `
+                <div class="host-card">
+                    <h3>${host.hostname}</h3>
+                    <p><strong>Total Packages:</strong> ${host.packages.length}</p>
+                     <details>
+                        <summary>View Packages</summary>
+                        <ul>
+                            ${host.packages.map(pkg =>
+                                `<li>${pkg.name} - ${pkg.version}</li>`
+                            ).join("")}
+                        </ul>
+                    </details>
+                </div>
+            `;
+        });
+
+        document.getElementById("output").innerHTML = html;
+
+    } catch (error) {
+        showError("Error loading packages");
+    }
+}
+/* ---------------- CIS RESULTS ---------------- */
+
+async function loadCIS() {
+    try {
+        const response = await fetch(baseURL + "/cis-results");
+        const data = await response.json();
+
+        let html = "";
+
+        data.forEach(host => {
+
+            const score = host.summary?.score_percent || 0;
+
+            html += `
+                <div class="host-card">
+                    <h2>${host.hostname}</h2>
+
+                    <div class="score-box">
+                        <div class="score-bar" style="width:${score}%"></div>
+                    </div>
+
+                    <p><strong>Security Score:</strong> ${score}%</p>
+            `;
+
+            host.cis_results.forEach(check => {
+
+                const badgeClass = check.status === "PASS"
+                    ? "badge-pass"
+                    : "badge-fail";
+
+                html += `
+                    <div class="cis-item">
+                        <span class="${badgeClass}">
+                            ${check.status}
+                        </span>
+                        <strong>${check.check_name}</strong>
+                        <div class="evidence">${check.evidence}</div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+        });
+
+        document.getElementById("output").innerHTML = html;
+
+    } catch (error) {
+        showError("Error loading CIS results");
+    }
+}
+
+/* ---------------- ERROR HANDLER ---------------- */
+
+function showError(message) {
+    document.getElementById("output").innerHTML =
+        `<p style="color:red; font-weight:bold;">${message}</p>`;
+}
+
+</script>
+
+</body>
+</html>
+
