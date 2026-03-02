@@ -1,0 +1,33 @@
+import json
+import boto3
+import datetime
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('cis-agent-reports') 
+
+def lambda_handler(event, context):
+    try:
+        body = json.loads(event['body'])
+
+        hostname = body.get("hostname", "unknown-host")
+        timestamp = datetime.datetime.utcnow().isoformat()
+
+        item = {
+            "host_id": hostname,
+            "timestamp": timestamp,
+            "data": body
+        }
+
+        table.put_item(Item=item)
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Report stored successfully"})
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
+
